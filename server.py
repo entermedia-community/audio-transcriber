@@ -1,12 +1,14 @@
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import JSONResponse
 import tempfile, os
-from faster_whisper import WhisperModel
+from faster_whisper import WhisperModel, BatchedInferencePipeline
 
 os.environ["OMP_NUM_THREADS"] = "4"
+os.environ["MKL_NUM_THREADS"] = "4"
 
 app = FastAPI()
 model = WhisperModel("base.en", device="cpu", compute_type="int8")
+batched_model = BatchedInferencePipeline(model=model)
 
 @app.post("/transcribe")
 async def transcribe(file: UploadFile = File(...)):
@@ -15,7 +17,7 @@ async def transcribe(file: UploadFile = File(...)):
       tmp.write(await file.read())
       tmp_path = tmp.name
 
-    segments, _ = model.transcribe(audio=tmp_path, vad_filter=True, language="en", log_progress=True)
+    segments, _ = batched_model.transcribe(audio=tmp_path, vad_filter=True, language="en", batch_size=16, chunk_length=5)
     os.remove(tmp_path)
     
     json = []
