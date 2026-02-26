@@ -13,12 +13,11 @@ faster-whisper>=1.0.3
 # ── Speaker diarization ───────────────────────────────────────────────────
 # pyannote.audio 3.x — state-of-the-art diarization, free on HuggingFace
 pyannote.audio>=3.3.1
-torch>=2.2.0
-torchaudio>=2.2.0
 
-# ── Optional: GPU acceleration ────────────────────────────────────────────
-# Uncomment for CUDA builds (replace cu13 with your CUDA version):
-torch>=2.2.0+cu13 --extra-index-url https://download.pytorch.org/whl/cu13
+torch --index-url https://download.pytorch.org/whl/cu130
+torchaudio --index-url https://download.pytorch.org/whl/cu130
+torchvision --index-url https://download.pytorch.org/whl/cu130
+
 
 librosa>=0.11.0
 soundfile>=0.13.1
