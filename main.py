@@ -87,6 +87,10 @@ class HealthResponse(BaseModel):
 # ─────────────────────────────────────────────
 # Routes
 # ─────────────────────────────────────────────
+@app.get("/")
+def home():
+  return f"<h1>Welcome to eMedia Transcription API!</h1>"
+
 @app.get("/health", response_model=HealthResponse, tags=["Meta"])
 def health():
     """Check API and model status."""
