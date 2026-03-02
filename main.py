@@ -11,17 +11,13 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from transcriber import Transcriber, TranscriptionResult
 from config import Settings
 
-import librosa
-import numpy as np
-import io
 # ─────────────────────────────────────────────
 # App setup
 # ─────────────────────────────────────────────
