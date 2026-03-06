@@ -9,10 +9,10 @@ faster-whisper
 
 pyannote.audio
 
-torch
-torchaudio
-torchvision
-torchcodec
+torch --index-url https://download.pytorch.org/whl/cu130
+torchaudio --index-url https://download.pytorch.org/whl/cu130
+torchvision --index-url https://download.pytorch.org/whl/cu130
+torchcodec --index-url https://download.pytorch.org/whl/cu130
 
 librosa
 soundfile
