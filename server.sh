@@ -1,1 +1,1 @@
-CUDA_VISIBLE_DEVICES=1 uvicorn main:app --port 5600 > /dev/null 2>&1 &
+CUDA_VISIBLE_DEVICES=1 uvicorn main:app --port 5600 --host 0.0.0.0 > /dev/null 2>&1 &
