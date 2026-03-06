@@ -12,6 +12,7 @@ pyannote.audio
 torch
 torchaudio
 torchvision
+torchcodec
 
 librosa
 soundfile
