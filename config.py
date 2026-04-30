@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     # ── Whisper ────────────────────────────────────────────────────────────
     # "medium" is the sweet spot: fast enough on CPU, excellent accuracy.
     # Use "small" for speed priority, "large-v3" for accuracy priority.
-    whisper_model: str = "medium"
+    whisper_model: str = "large-v3"
 
     # Auto-detected: cuda if available, else cpu
     device: str = _auto_device()
