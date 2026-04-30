@@ -50,7 +50,7 @@ class Settings(BaseSettings):
 
     # ── API ────────────────────────────────────────────────────────────────
     host: str = "0.0.0.0"
-    port: int = 8000
+    port: int = 5600
 
     def model_post_init(self, __context):
         # Resolve compute_type after device is known
