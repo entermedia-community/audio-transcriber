@@ -1,15 +1,6 @@
 """
 Transcriber: merges faster-whisper segments with pyannote diarization.
-
-Pipeline:
-1. faster-whisper  → timestamped word/segment transcription
-2. pyannote        → speaker turn annotations  (SPEAKER_00, SPEAKER_01 …)
-3. merge           → assign each whisper segment the dominant speaker
-
-Fix: audio is zero-padded to a multiple of pyannote's 10-second chunk
-(160 000 samples @ 16 kHz) before diarization.  This prevents the noisy
-"requested N samples … resulted in M samples" UserWarning that fires when
-the last window is shorter than expected.
+Optimized for low VRAM environments via sequential model loading and offloading.
 """
 
 import logging
@@ -18,7 +9,7 @@ import os
 import tempfile
 import warnings
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Generator
 
 import numpy as np
 import soundfile as sf
@@ -30,13 +21,9 @@ from config import Settings
 
 logger = logging.getLogger(__name__)
 
-# pyannote chunks audio into 10-second windows at 16 kHz  →  160 000 samples
 _PYANNOTE_CHUNK_SAMPLES = 160_000
 
 
-# ─────────────────────────────────────────────
-# Data models
-# ─────────────────────────────────────────────
 @dataclass
 class Segment:
     speaker: str
@@ -53,44 +40,18 @@ class TranscriptionResult:
     segments: list[Segment] = field(default_factory=list)
 
 
-# ─────────────────────────────────────────────
-# Transcriber
-# ─────────────────────────────────────────────
 class Transcriber:
     def __init__(self, settings: Settings):
         self.settings = settings
+        logger.info("Initializing asynchronous-ready transcriber architecture...")
 
-        logger.info(
-            "Loading Whisper model '%s' on %s (Device Index: %d) with %s…",
-            settings.whisper_model,
-            settings.device,
-            settings.device_index,
-            settings.compute_type,
-        )
-        
-        # Explicitly assign the correct index computed from your .env environment layout
-        self.whisper = WhisperModel(
-            settings.whisper_model,
-            device=settings.device,
-            device_index=settings.device_index,
-            compute_type=settings.compute_type,
-            num_workers=settings.whisper_num_workers,
-            cpu_threads=settings.whisper_cpu_threads,
-        )
-
-        logger.info("Loading pyannote diarization pipeline…")
-        self.diarization_pipeline = Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-3.1",
-            token=settings.hf_token,
-        )
-
-        if settings.device == "cuda":
-            # Direct pyannote to look at the exact same device index safely
-            self.diarization_pipeline = self.diarization_pipeline.to(
-                torch.device(f"cuda:{settings.device_index}")
-            )
-
-        logger.info("Models ready.")
+    def _flush_gpu(self):
+        """Forces Python to clean up variables and release unused VRAM cache back to the OS."""
+        import gc
+        gc.collect()
+        if self.settings.device == "cuda":
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
 
     # ──────────────────────────────────────────
     def run(
@@ -102,19 +63,36 @@ class Transcriber:
         num_speakers: Optional[int] = None,
     ) -> TranscriptionResult:
 
-        # 1. Transcribe ──────────────────────────
-        logger.info("Transcribing '%s'…", audio_path)
-        whisper_segments, info = self.whisper.transcribe(
-            audio_path,
-            language=language,
-            beam_size=self.settings.beam_size,
-            vad_filter=True,
-            vad_parameters={"min_silence_duration_ms": 500},
-            word_timestamps=True,
+        # --- PHASE 1: WHISPER TRANSCRIPTION ---
+        logger.info("Loading Whisper model '%s' dynamically to GPU…", self.settings.whisper_model)
+        whisper_model = WhisperModel(
+            self.settings.whisper_model,
+            device=self.settings.device,
+            device_index=self.settings.device_index,
+            compute_type=self.settings.compute_type,
+            num_workers=self.settings.whisper_num_workers,
+            cpu_threads=self.settings.whisper_cpu_threads,
         )
 
-        # Materialise the lazy generator before diarization starts
-        raw_segments = list(whisper_segments)
+        try:
+            logger.info("Transcribing '%s'…", audio_path)
+            whisper_segments, info = whisper_model.transcribe(
+                audio_path,
+                language=language,
+                beam_size=self.settings.beam_size,
+                vad_filter=True,
+                vad_parameters={"min_silence_duration_ms": 500},
+                word_timestamps=True,
+            )
+
+            # Materialize generator while Whisper is fully active on GPU
+            raw_segments = list(whisper_segments)
+            
+        finally:
+            # Explicitly delete the whisper reference and sweep VRAM
+            logger.info("Offloading Whisper model from GPU memory...")
+            del whisper_model
+            self._flush_gpu()
 
         if not raw_segments:
             return TranscriptionResult(
@@ -123,11 +101,18 @@ class Transcriber:
                 language_probability=info.language_probability,
             )
 
-        # 2. Diarise ─────────────────────────────
-        logger.info("Running speaker diarization…")
+        # --- PHASE 2: PYANNOTE DIARIZATION ---
+        logger.info("Loading pyannote diarization pipeline dynamically to GPU…")
+        diarization_pipeline = Pipeline.from_pretrained(
+            "pyannote/speaker-diarization-3.1",
+            token=self.settings.hf_token,
+        )
 
-        # Pad audio to a chunk boundary so pyannote never receives a truncated
-        # last window — fixes "requested N samples, got M samples" warning.
+        if self.settings.device == "cuda":
+            diarization_pipeline = diarization_pipeline.to(
+                torch.device(f"cuda:{self.settings.device_index}")
+            )
+
         padded_path, is_temp = self._pad_audio(audio_path)
         try:
             diarize_kwargs: dict = {}
@@ -139,52 +124,46 @@ class Transcriber:
                 if max_speakers:
                     diarize_kwargs["max_speakers"] = max_speakers
 
-            # Belt-and-suspenders: also suppress any residual warning from
-            # pyannote sub-models that do their own internal chunking.
+            logger.info("Running speaker diarization…")
             with warnings.catch_warnings():
                 warnings.filterwarnings(
                     "ignore",
                     message=r".*resulted in \d+ samples instead of.*",
                     category=UserWarning,
                 )
-                diarization = self.diarization_pipeline(padded_path, **diarize_kwargs)
-        
+                diarization = diarization_pipeline(padded_path, **diarize_kwargs)
 
-            # Build a sorted list of (start, end, speaker) turns
             turns = [
                 (round(turn.start, 3), round(turn.end, 3), speaker)
                 for turn, speaker in diarization.speaker_diarization
             ]
 
-            # 3. Merge ───────────────────────────────
-            merged = self._merge(raw_segments, turns)
-
-            return TranscriptionResult(
-                duration=info.duration,
-                language=info.language,
-                language_probability=info.language_probability,
-                segments=merged,
-            )
         finally:
+            # Explicitly delete the diarizer reference and sweep VRAM
+            logger.info("Offloading Pyannote pipeline from GPU memory...")
+            del diarization_pipeline
+            self._flush_gpu()
+            
             if is_temp:
                 os.unlink(padded_path)
+
+        # --- PHASE 3: MERGING RESULTS ---
+        merged = self._merge(raw_segments, turns)
+
+        return TranscriptionResult(
+            duration=info.duration,
+            language=info.language,
+            language_probability=info.language_probability,
+            segments=merged,
+        )
 
     # ──────────────────────────────────────────
     @staticmethod
     def _pad_audio(audio_path: str) -> tuple[str, bool]:
-        """
-        Read audio, downmix to mono 16 kHz, then zero-pad to the nearest
-        multiple of _PYANNOTE_CHUNK_SAMPLES.
-
-        Returns (path, is_temp).  Caller must os.unlink(path) when is_temp.
-        """
         data, sr = sf.read(audio_path, always_2d=False, dtype="float32")
-
-        # Downmix to mono
         if data.ndim == 2:
             data = data.mean(axis=1)
 
-        # Resample to 16 kHz if needed
         if sr != 16_000:
             try:
                 import resampy
@@ -195,7 +174,6 @@ class Transcriber:
                 data = resample_poly(data, 16_000 // g, sr // g).astype("float32")
             sr = 16_000
 
-        # Zero-pad to the next chunk boundary
         remainder = len(data) % _PYANNOTE_CHUNK_SAMPLES
         if remainder != 0:
             data = np.concatenate(
@@ -210,21 +188,14 @@ class Transcriber:
     # ──────────────────────────────────────────
     @staticmethod
     def _merge(whisper_segments, turns: list[tuple]) -> list[Segment]:
-        """
-        Assign each Whisper segment the speaker with the maximum time overlap.
-        Falls back to 'UNKNOWN' if no diarization turn overlaps at all.
-        """
         result: list[Segment] = []
-
         for ws in whisper_segments:
             seg_start, seg_end = ws.start, ws.end
             best_speaker = "UNKNOWN"
             best_overlap = 0.0
 
             for t_start, t_end, speaker in turns:
-                overlap = max(
-                    0.0, min(seg_end, t_end) - max(seg_start, t_start)
-                )
+                overlap = max(0.0, min(seg_end, t_end) - max(seg_start, t_start))
                 if overlap > best_overlap:
                     best_overlap = overlap
                     best_speaker = speaker
@@ -237,5 +208,4 @@ class Transcriber:
                     text=ws.text,
                 )
             )
-
         return result
