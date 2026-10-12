@@ -61,14 +61,18 @@ class Transcriber:
         self.settings = settings
 
         logger.info(
-            "Loading Whisper model '%s' on %s (%s)…",
+            "Loading Whisper model '%s' on %s (Device Index: %d) with %s…",
             settings.whisper_model,
             settings.device,
+            settings.device_index,
             settings.compute_type,
         )
+        
+        # Explicitly assign the correct index computed from your .env environment layout
         self.whisper = WhisperModel(
             settings.whisper_model,
             device=settings.device,
+            device_index=settings.device_index,
             compute_type=settings.compute_type,
             num_workers=settings.whisper_num_workers,
             cpu_threads=settings.whisper_cpu_threads,
@@ -81,8 +85,9 @@ class Transcriber:
         )
 
         if settings.device == "cuda":
+            # Direct pyannote to look at the exact same device index safely
             self.diarization_pipeline = self.diarization_pipeline.to(
-                torch.device("cuda")
+                torch.device(f"cuda:{settings.device_index}")
             )
 
         logger.info("Models ready.")

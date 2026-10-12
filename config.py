@@ -1,10 +1,5 @@
 """
 Configuration — all values can be overridden via environment variables.
-
-Example .env:
-    WHISPER_MODEL=medium
-    DEVICE=cpu
-    HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxx
 """
 
 import os
@@ -25,27 +20,24 @@ def _auto_compute_type(device: str) -> str:
 
 
 class Settings(BaseSettings):
+    # This automatically pulls ANY variable matching these names from your root .env
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    # ── CUDA Environmental Mapping ──────────────────────────────────────────
+    # Reads CUDA_VISIBLE_DEVICES from your root .env if it is declared there
+    cuda_visible_devices: str = os.getenv("CUDA_VISIBLE_DEVICES", "0")
+
     # ── Whisper ────────────────────────────────────────────────────────────
-    # "medium" is the sweet spot: fast enough on CPU, excellent accuracy.
-    # Use "small" for speed priority, "large-v3" for accuracy priority.
     whisper_model: str = "large-v3"
-
-    # Auto-detected: cuda if available, else cpu
     device: str = _auto_device()
+    device_index: int = 0  # Automatically falls to 0 to align with masked visible arrays
+    compute_type: str = ""  
 
-    # int8 on CPU (≈2× faster, minimal accuracy loss)
-    # float16 on GPU (native speed, full precision)
-    compute_type: str = ""  # resolved below
-
-    beam_size: int = 5          # 5 = default quality; lower = faster
+    beam_size: int = 5          
     whisper_num_workers: int = 1
     whisper_cpu_threads: int = 4
 
     # ── Pyannote ───────────────────────────────────────────────────────────
-    # Required: get a free token at https://huggingface.co/pyannote/speaker-diarization-3.1
-    # Accept the model's conditions on the HF page first.
     hf_token: str = os.getenv("HF_TOKEN", "")
 
     # ── API ────────────────────────────────────────────────────────────────
@@ -53,6 +45,21 @@ class Settings(BaseSettings):
     port: int = 5600
 
     def model_post_init(self, __context):
-        # Resolve compute_type after device is known
+        # 1. Standardize string variations (e.g., if DEVICE="cuda:0" or "cuda:1")
+        if ":" in self.device:
+            dev_type, idx = self.device.split(":")
+            object.__setattr__(self, "device", dev_type.strip())
+            try:
+                object.__setattr__(self, "device_index", int(idx))
+            except ValueError:
+                pass
+
+        # 2. Safety Override: If CUDA_VISIBLE_DEVICES isolates a single GPU, 
+        # any index higher than 0 is invisible to the runtime environment.
+        if "," not in self.cuda_visible_devices and self.cuda_visible_devices.isdigit():
+            # If it's a single assigned card like "0", "1", or "2", the OS maps it as index 0 inside Python
+            object.__setattr__(self, "device_index", 0)
+
+        # 3. Resolve precision
         if not self.compute_type:
             object.__setattr__(self, "compute_type", _auto_compute_type(self.device))
