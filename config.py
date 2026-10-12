@@ -67,8 +67,8 @@ class Settings(BaseSettings):
         if not self.compute_type:
             if self.device == "cuda":
                 env_cuda_type = os.getenv("CUDA_COMPUTE_TYPE") or os.getenv("CUDA_COPUTE_TYPE")
-                # CHANGED: 'int8_float16' is the correct supported string name
-                resolved_type = env_cuda_type if env_cuda_type else "int8_float16"
+                # CHANGED: Use float16 (or bfloat16) to satisfy RTX 50-series architectures
+                resolved_type = env_cuda_type if env_cuda_type else "float16"
             else:
                 resolved_type = "int8"
                 
