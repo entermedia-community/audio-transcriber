@@ -63,14 +63,13 @@ class Settings(BaseSettings):
         if "," not in cuda_env and cuda_env.isdigit():
             object.__setattr__(self, "device_index", 0)
 
-        # 3. Resolve precision based on CUDA_COMPUTE_TYPE environment fallback
+       # 3. Resolve precision dynamically
         if not self.compute_type:
             if self.device == "cuda":
-                # Check for CUDA_COMPUTE_TYPE (handling potential typo variations too)
                 env_cuda_type = os.getenv("CUDA_COMPUTE_TYPE") or os.getenv("CUDA_COPUTE_TYPE")
-                resolved_type = env_cuda_type if env_cuda_type else "float16_int8"
+                # CHANGED: 'int8_float16' is the correct supported string name
+                resolved_type = env_cuda_type if env_cuda_type else "int8_float16"
             else:
-                # Standard CPU precision fallback
                 resolved_type = "int8"
                 
             object.__setattr__(self, "compute_type", resolved_type)
