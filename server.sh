@@ -20,6 +20,8 @@ fi
 
 lsof -ti :5600 | xargs -r kill -9
 
+sleep 2
+
 if [[ -f ".venv/bin/activate" ]]; then
   source .venv/bin/activate
 fi
