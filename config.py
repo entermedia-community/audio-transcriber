@@ -5,6 +5,14 @@ Configuration — all values can be overridden via environment variables.
 import os
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from dotenv import load_dotenv
+
+# Define the absolute target to your shared file explicitly
+_HOME_ENV = Path.home() / ".env"
+
+# Force Python to read it instantly and merge it with os.environ system-wide
+if _HOME_ENV.exists():
+    load_dotenv(dotenv_path=_HOME_ENV)
 
 
 def _auto_device() -> str:
@@ -14,27 +22,24 @@ def _auto_device() -> str:
     except ImportError:
         return "cpu"
 
-
-# Dynamically locate the absolute path to your home directory (~/.env)
-_HOME_ENV = Path.home() / ".env"
-
 class Settings(BaseSettings):
-    # Pass the absolute path straight to Pydantic
-    model_config = SettingsConfigDict(env_file=_HOME_ENV, extra="ignore")
+   # This reads straight from the system environment we just injected above
+    model_config = SettingsConfigDict(extra="ignore")
 
+    # ── CUDA Environmental Mapping ──────────────────────────────────────────
+    # Now it dynamically catches the value from your home .env perfectly
+    cuda_visible_devices: str = os.getenv("CUDA_VISIBLE_DEVICES", "0")
 
     # ── Whisper ────────────────────────────────────────────────────────────
-    whisper_model: str = "large-v3"
+    whisper_model: str = os.getenv("WHISPER_MODEL", "large-v3")
     device: str = _auto_device()
     device_index: int = 0  
-
-    # Automatically tries to map from your .env if COMPUTE_TYPE is declared there.
-    # Otherwise, we resolve it dynamically below using your custom variable rules.
     compute_type: str = ""  
 
     beam_size: int = 5          
     whisper_num_workers: int = 1
     whisper_cpu_threads: int = 4
+
 
     # ── Pyannote ───────────────────────────────────────────────────────────
     hf_token: str = os.getenv("HF_TOKEN", "")
