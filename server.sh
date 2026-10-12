@@ -13,7 +13,8 @@ elif [ -f "$(dirname "$0")/.env" ]; then
     set +a
 fi
 
-export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
+#CUDA variables loaded in  config.py
+#export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 #export CUDA_VISIBLE_DEVICES=0
 
 

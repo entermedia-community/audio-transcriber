@@ -3,6 +3,7 @@ Configuration — all values can be overridden via environment variables.
 """
 
 import os
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,8 +15,13 @@ def _auto_device() -> str:
         return "cpu"
 
 
+# Dynamically locate the absolute path to your home directory (~/.env)
+_HOME_ENV = Path.home() / ".env"
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Pass the absolute path straight to Pydantic
+    model_config = SettingsConfigDict(env_file=_HOME_ENV, extra="ignore")
+
 
     # ── Whisper ────────────────────────────────────────────────────────────
     whisper_model: str = "large-v3"
