@@ -5,7 +5,7 @@ if [[ -f ".venv/bin/activate" ]]; then
   source .venv/bin/activate
 fi
 
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=0
 uvicorn main:app \
   --port 5600 \
   --host 0.0.0.0 \
