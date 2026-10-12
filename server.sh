@@ -33,3 +33,7 @@ uvicorn main:app \
   2>&1 | multilog t s5000000 n3 "$LOGFILE" &
 
   deactivate
+
+#Initialize server and warm-up request
+sleep 5
+curl -X POST https://transcribe.emediaworkspace.com/warm-up
